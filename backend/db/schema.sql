@@ -1,0 +1,60 @@
+-- GPU Resource Reservation System - Database Schema
+-- Run this against your PostgreSQL database to set up tables
+
+CREATE TABLE IF NOT EXISTS users (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    email VARCHAR(150) UNIQUE NOT NULL,
+    password VARCHAR(255) NOT NULL,
+    role VARCHAR(20) DEFAULT 'student' CHECK (role IN ('student', 'faculty', 'researcher', 'admin')),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS gpus (
+    id SERIAL PRIMARY KEY,
+    model VARCHAR(100) NOT NULL,
+    vram VARCHAR(20),
+    status VARCHAR(20) DEFAULT 'available' CHECK (status IN ('available', 'maintenance', 'retired')),
+    location VARCHAR(100),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS reservations (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    gpu_id INTEGER REFERENCES gpus(id) ON DELETE CASCADE,
+    date DATE NOT NULL,
+    start_time TIME NOT NULL,
+    end_time TIME NOT NULL,
+    status VARCHAR(20) DEFAULT 'confirmed' CHECK (status IN ('confirmed', 'cancelled', 'completed')),
+    purpose TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS queue (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    gpu_id INTEGER REFERENCES gpus(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    status VARCHAR(20) DEFAULT 'waiting' CHECK (status IN ('waiting', 'notified', 'expired')),
+    joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS notifications (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    message TEXT NOT NULL,
+    type VARCHAR(30) DEFAULT 'info' CHECK (type IN ('info', 'success', 'warning', 'booking_confirmed', 'booking_cancelled', 'queue_update')),
+    is_read BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS usage_logs (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    gpu_id INTEGER REFERENCES gpus(id) ON DELETE CASCADE,
+    reservation_id INTEGER REFERENCES reservations(id) ON DELETE SET NULL,
+    booking_duration INTERVAL,
+    actual_usage_time INTERVAL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);

@@ -1,0 +1,114 @@
+.my-reservations h1 {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0 0 20px 0;
+}
+
+.success-msg {
+  background: #ecfdf5;
+  color: var(--success);
+  border: 1px solid #bbf7d0;
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  font-size: 14px;
+  margin-bottom: 20px;
+}
+
+.empty-state {
+  text-align: center;
+  padding: 48px 0;
+  color: var(--text-secondary);
+}
+
+.empty-state p {
+  font-size: 15px;
+  margin-bottom: 16px;
+}
+
+.empty-state .btn-primary {
+  display: inline-block;
+  text-decoration: none;
+}
+
+.reservations-table-wrapper {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow-x: auto;
+}
+
+.reservations-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.reservations-table thead {
+  background: #f9fafb;
+}
+
+.reservations-table th {
+  text-align: left;
+  padding: 12px 16px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  border-bottom: 1px solid var(--border);
+}
+
+.reservations-table td {
+  padding: 12px 16px;
+  border-bottom: 1px solid #f3f4f6;
+  color: var(--text-primary);
+}
+
+.reservations-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.td-model {
+  font-weight: 500;
+}
+
+.td-purpose {
+  max-width: 200px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.status-confirmed {
+  background: #ecfdf5;
+  color: var(--success);
+}
+
+.status-cancelled {
+  background: #f3f4f6;
+  color: var(--text-secondary);
+}
+
+.status-completed {
+  background: #eff6ff;
+  color: var(--info);
+}
+
+.btn-cancel {
+  background: transparent;
+  border: 1px solid var(--danger);
+  color: var(--danger);
+  font-size: 13px;
+  font-weight: 500;
+  font-family: var(--font);
+  padding: 4px 12px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.btn-cancel:hover {
+  background: var(--danger);
+  color: #ffffff;
+}
