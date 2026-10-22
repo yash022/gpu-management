@@ -1,21 +1,21 @@
 :root {
-  --bg-primary: #f5f5f0;
+  --bg-primary: #f6f8fb;
   --bg-card: #ffffff;
   --bg-dark: #1a1a2e;
   --bg-sidebar: #16213e;
-  --text-primary: #2d2d2d;
+  --text-primary: #202d42;
   --text-secondary: #6b7280;
   --text-light: #9ca3af;
-  --border: #e5e5e0;
-  --accent: #c45d3e;
-  --accent-hover: #a84832;
+  --border: #e3e8f0;
+  --accent: #335bc2;
+  --accent-hover: #26479e;
   --success: #2d8a4e;
   --warning: #c78c1e;
   --danger: #c43e3e;
   --info: #3e6fc4;
   --shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.06);
-  --radius: 6px;
+  --radius: 10px;
   --font: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
 }
 

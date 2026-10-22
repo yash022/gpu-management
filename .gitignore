@@ -19,3 +19,10 @@ yarn-debug.log*
 # System Files
 .DS_Store
 Thumbs.db
+
+# Browser test artifacts
+test-results/
+playwright-report/
+
+# Local database credentials and migration snapshots
+.local/

@@ -1,5 +1,8 @@
+const { gpuBody } = require('../middleware/validation');
 const express = require('express');
 const router = express.Router();
+router.param('id', require('../middleware/validation').resourceId);
+router.param('gpuId', require('../middleware/validation').resourceId);
 const pool = require('../config/db');
 const { auth, adminOnly } = require('../middleware/auth');
 
@@ -34,7 +37,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // POST /api/gpus - Admin only, create GPU
-router.post('/', auth, adminOnly, async (req, res) => {
+router.post('/', auth, adminOnly, gpuBody, async (req, res) => {
   try {
     const { model, vram, status, location } = req.body;
 
@@ -51,7 +54,7 @@ router.post('/', auth, adminOnly, async (req, res) => {
 });
 
 // PUT /api/gpus/:id - Admin only, update GPU
-router.put('/:id', auth, adminOnly, async (req, res) => {
+router.put('/:id', auth, adminOnly, gpuBody, async (req, res) => {
   try {
     const { model, vram, status, location } = req.body;
 

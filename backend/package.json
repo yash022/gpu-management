@@ -5,18 +5,21 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "nodemon server.js"
+    "dev": "node --watch server.js",
+    "test": "node --test tests/*.test.js",
+    "migrate": "node db/migrate.js",
+    "test:sessions": "node --test tests/sessions.test.js",
+    "test:postgres": "node --test --test-concurrency=1 tests/sessions.test.js tests/process-sessions.test.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
+    "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.21.0",
-    "jsonwebtoken": "^9.0.2",
+    "express-rate-limit": "^8.7.1",
+    "helmet": "^8.3.0",
     "pg": "^8.13.0",
     "pg-mem": "^3.0.14"
-  },
-  "devDependencies": {
-    "nodemon": "^3.1.4"
   }
 }

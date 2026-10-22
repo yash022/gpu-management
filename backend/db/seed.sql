@@ -1,9 +1,13 @@
 -- Seed data for GPU Resource Reservation System
 -- Run after schema.sql
 
--- Insert admin user (password: admin123 - bcrypt hashed)
+-- Insert demo users for all roles (password: admin123 - bcrypt hashed)
+-- Hash: $2a$10$D25OpvUu4Z89emwpUsZZS./a01j0D8HdphFBXXxfc1okQiDAJvgsi
 INSERT INTO users (name, email, password, role) VALUES
-('Admin User', 'admin@muj.manipal.edu', '$2a$10$D25OpvUu4Z89emwpUsZZS./a01j0D8HdphFBXXxfc1okQiDAJvgsi', 'admin');
+('Admin User', 'admin@muj.manipal.edu', '$2a$10$D25OpvUu4Z89emwpUsZZS./a01j0D8HdphFBXXxfc1okQiDAJvgsi', 'admin'),
+('Rahul Sharma (Student)', 'student@muj.manipal.edu', '$2a$10$D25OpvUu4Z89emwpUsZZS./a01j0D8HdphFBXXxfc1okQiDAJvgsi', 'student'),
+('Dr. Neha Verma (Faculty)', 'faculty@muj.manipal.edu', '$2a$10$D25OpvUu4Z89emwpUsZZS./a01j0D8HdphFBXXxfc1okQiDAJvgsi', 'faculty'),
+('Aman Gupta (Researcher)', 'researcher@muj.manipal.edu', '$2a$10$D25OpvUu4Z89emwpUsZZS./a01j0D8HdphFBXXxfc1okQiDAJvgsi', 'researcher');
 
 -- Insert sample GPUs
 INSERT INTO gpus (model, vram, status, location) VALUES

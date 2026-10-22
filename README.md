@@ -20,7 +20,7 @@ Developed according to IEEE 830-1998 Software Requirements Specification (SRS) s
 
 ## 🛠️ Technology Stack
 - **Frontend**: React 19, Vite, React Router v7, Axios, Modern CSS3 Design System
-- **Backend**: Node.js, Express, JSON Web Tokens (JWT), Bcrypt.js, CORS, Dotenv
+- **Backend**: Node.js, Express, HttpOnly cookie sessions, Bcrypt.js, CORS, Dotenv
 - **Database**: PostgreSQL (with automatic zero-dependency in-memory fallback via `pg-mem` for offline lab evaluation)
 
 ---
@@ -53,7 +53,7 @@ Access the client application in your browser at:
 | Role | Email | Password |
 | :--- | :--- | :--- |
 | **Administrator** | `admin@muj.manipal.edu` | `admin123` |
-| **Student / Faculty** | Self-register on the `/register` page | Any (min 6 characters) |
+| **Student / Faculty** | Self-register on the `/register` page | Minimum 8 characters (maximum 72 UTF-8 bytes) |
 
 ---
 
@@ -61,8 +61,10 @@ Access the client application in your browser at:
 
 ### Authentication (`/api/auth`)
 - `POST /api/auth/register` - Create a student, faculty, or researcher account
-- `POST /api/auth/login` - Authenticate and receive JWT token
-- `GET /api/auth/me` - Retrieve current session user profile
+- `POST /api/auth/login` - Authenticate and create a server-side session
+- `GET /api/auth/me` - Retrieve current user, CSRF token, and expiry
+- `POST /api/auth/logout` - Revoke current session and clear cookie
+- `POST /api/auth/logout-all` - Revoke all sessions for the current account
 
 ### GPU Hardware (`/api/gpus`)
 - `GET /api/gpus` - Fetch all registered GPUs
@@ -94,3 +96,60 @@ Access the client application in your browser at:
 - `PUT /api/admin/users/:id/role` - Update user role
 - `DELETE /api/admin/users/:id` - Delete user account
 - `GET /api/admin/reports` - Hardware utilization and booking analytics
+
+## UI and security update
+
+GPUspace provides a responsive campus workspace, searchable/filterable GPU catalog,
+VRAM sorting, loading and retry states, and consistent booking and account screens.
+Booking dates and times are interpreted in **India Standard Time**.
+
+Self-registration cannot create administrators. Sessions use random opaque HttpOnly
+cookies and PostgreSQL records containing only the hash of the cookie credential.
+Logout revokes the session on the server, and "Sign out on all devices" revokes all
+sessions for that account. Protected requests check the current database role.
+CSRF tokens, origin checks, and shared database-backed authentication limits protect
+mutations. No bearer credentials are kept in browser storage.
+
+Default sessions expire after 8 hours or 30 minutes without activity. The optional
+"Keep me signed in" choice lasts up to 30 days with a 7-day idle limit. Browser
+session restoration behavior varies; server-side expiry always applies. Notification
+polling and session checks do not extend idle expiry. Closing a tab is not logout.
+
+The in-memory fallback and demo users are for local evaluation only.
+`NODE_ENV=production` requires a working `DATABASE_URL`, migrated schema, and an
+explicit HTTPS `FRONTEND_ORIGIN`. Production cookies use the `__Host-` prefix,
+`Secure`, `HttpOnly`, and `SameSite=Lax`. Old JWT sessions are intentionally invalid
+following this migration. Provision production administrators separately.
+
+Serve the frontend and `/api` under the same HTTPS origin. Development uses Vite's
+proxy. A same-site API subdomain can use `VITE_API_URL` plus an explicit allowed
+frontend origin; cross-site third-party-cookie deployments are not supported.
+See [DEPLOYMENT.md](DEPLOYMENT.md) for migration, connection limits, and rollout.
+
+## Repeatable checks
+
+Backend (Node 22 or newer):
+```bash
+cd backend
+npm ci
+npm test
+npm audit
+```
+
+Frontend:
+```bash
+cd frontend
+npm ci
+npx playwright install chromium
+npm test
+npm run build
+npm run lint
+npm audit
+```
+
+Browser tests start isolated servers on ports 5001 and 5174 and use disposable
+in-memory data. They cover desktop and mobile viewports. To use an installed
+Chrome browser instead, set `PLAYWRIGHT_CHANNEL=chrome`. Screenshots and failure
+traces are written to `frontend/test-results/` (ignored by Git).
+
+See [TESTING.md](TESTING.md) for coverage and remaining validation limits.

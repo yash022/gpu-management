@@ -4,6 +4,7 @@ import Layout from '../components/Layout';
 import './AdminPanel.css';
 
 export default function AdminPanel() {
+  const [loadError, setLoadError] = useState('');
   const [stats, setStats] = useState(null);
   const [gpus, setGpus] = useState([]);
   const [reservations, setReservations] = useState([]);
@@ -35,7 +36,7 @@ export default function AdminPanel() {
       setUsers(usersRes.data);
       setReports(reportsRes.data);
     } catch {
-      // ignore
+      setLoadError('Unable to load the administration panel. Please refresh to try again.');
     } finally {
       setLoading(false);
     }
@@ -157,6 +158,7 @@ export default function AdminPanel() {
   return (
     <Layout>
       <div className="admin-panel">
+        {loadError && <div className="form-error" role="alert">{loadError}</div>}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
           <div>
             <h1>Admin Control Panel</h1>

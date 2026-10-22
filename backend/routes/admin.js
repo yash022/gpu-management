@@ -1,5 +1,7 @@
 const express = require('express');
 const router = express.Router();
+router.param('id', require('../middleware/validation').resourceId);
+router.param('gpuId', require('../middleware/validation').resourceId);
 const pool = require('../config/db');
 const { auth, adminOnly } = require('../middleware/auth');
 
@@ -52,6 +54,7 @@ router.get('/users', auth, adminOnly, async (req, res) => {
 router.put('/users/:id/role', auth, adminOnly, async (req, res) => {
   try {
     const { role } = req.body;
+    if (Number(req.params.id) === req.user.id && role !== 'admin') return res.status(400).json({ message: 'Cannot remove your own admin role' });
     const validRoles = ['student', 'faculty', 'researcher', 'admin'];
 
     if (!validRoles.includes(role)) {

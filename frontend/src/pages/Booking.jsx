@@ -4,7 +4,7 @@ import api from '../api/axios';
 import Layout from '../components/Layout';
 import './Booking.css';
 
-const TODAY_DATE = new Date().toISOString().split('T')[0];
+const todayInIndia = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 
 export default function Booking() {
   const { gpuId } = useParams();
@@ -32,7 +32,7 @@ export default function Booking() {
       setGpu(found || null);
       setQueueCount(queueRes.data?.waiting_count || 0);
     } catch {
-      // ignore
+      setError('Unable to load this resource. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -104,7 +104,7 @@ export default function Booking() {
   if (!gpu) {
     return (
       <Layout>
-        <p className="empty-text">GPU not found.</p>
+        <p className="empty-text">{error || 'GPU not found.'}</p>
       </Layout>
     );
   }
@@ -112,7 +112,8 @@ export default function Booking() {
   return (
     <Layout>
       <div className="booking">
-        <h1>Reserve GPU Resource</h1>
+        <h1>Make room for your next idea.</h1>
+        <p className="booking-hint">Choose your session. All dates and times are in India Standard Time (IST).</p>
         <div className="booking-gpu-info">
           <div>
             <h2>{gpu.model}</h2>
@@ -149,13 +150,14 @@ export default function Booking() {
           </div>
         )}
 
+        {gpu.status !== 'available' && <div className="form-error" role="alert">This resource is currently unavailable for reservations.</div>}
         <form className="booking-form" onSubmit={handleSubmit}>
           <div className="form-group">
             <label htmlFor="date">Reservation Date</label>
             <input
               id="date"
               type="date"
-              min={TODAY_DATE}
+              min={todayInIndia()}
               value={date}
               onChange={(e) => setDate(e.target.value)}
               required
@@ -188,6 +190,7 @@ export default function Booking() {
             <textarea
               id="purpose"
               rows="3"
+              maxLength={2000}
               value={purpose}
               onChange={(e) => setPurpose(e.target.value)}
               placeholder="e.g., Fine-tuning Llama-3 for NLP Lab experiment, Deep learning computer vision model"
@@ -195,7 +198,7 @@ export default function Booking() {
             />
           </div>
           <div style={{ display: 'flex', gap: '12px' }}>
-            <button type="submit" className="btn-primary" disabled={submitting}>
+            <button type="submit" className="btn-primary" disabled={submitting || gpu.status !== 'available'}>
               {submitting ? 'Confirming...' : 'Confirm Reservation'}
             </button>
             <button

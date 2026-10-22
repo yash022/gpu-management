@@ -1,87 +1,147 @@
-import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
-import { useState, useEffect, useCallback } from 'react';
-import api from '../api/axios';
-import './Layout.css';
-
+import { NavLink, Link, useNavigate } from "react-router-dom";
+import { useAuth } from "../context/useAuth";
+import { useState, useEffect } from "react";
+import api from "../api/axios";
+import { authError } from "../api/axios";
+import "./Layout.css";
 export default function Layout({ children }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const location = useLocation();
-  const [unreadCount, setUnreadCount] = useState(0);
-
-  const fetchUnreadCount = useCallback(async () => {
+  const [unread, setUnread] = useState(0);
+  const [signingOut, setSigningOut] = useState(false);
+  const [logoutError, setLogoutError] = useState("");
+  const [accountOpen, setAccountOpen] = useState(false);
+  const handleLogout = async (all = false) => {
+    if (signingOut) return;
+    setSigningOut(true);
+    setLogoutError("");
     try {
-      const res = await api.get('/notifications');
-      const unread = res.data.filter((n) => !n.is_read).length;
-      setUnreadCount(unread);
-    } catch {
-      // ignore
+      await logout(all);
+      navigate("/login", { replace: true });
+    } catch (error) {
+      setLogoutError(authError(error, "Sign-out failed. Please try again."));
+    } finally {
+      setSigningOut(false);
     }
-  }, []);
-
-  useEffect(() => {
-    fetchUnreadCount();
-    const interval = setInterval(fetchUnreadCount, 30000);
-    return () => clearInterval(interval);
-  }, [fetchUnreadCount]);
-
-  const handleLogout = () => {
-    logout();
-    navigate('/login');
   };
-
-  const isActive = (path) => location.pathname === path;
-
+  useEffect(() => {
+    let active = true;
+    const refresh = () =>
+      api
+        .get("/notifications")
+        .then(({ data }) => {
+          if (active) setUnread(data.filter((n) => !n.is_read).length);
+        })
+        .catch(() => {});
+    refresh();
+    const timer = setInterval(refresh, 30000);
+    window.addEventListener("notifications-updated", refresh);
+    return () => {
+      active = false;
+      clearInterval(timer);
+      window.removeEventListener("notifications-updated", refresh);
+    };
+  }, []);
   return (
-    <div className="layout">
-      <nav className="navbar">
-        <div className="navbar-inner">
-          <Link to="/dashboard" className="navbar-brand">
-            <span style={{ marginRight: '6px' }}>⚡</span> GPU Manager
-          </Link>
-          <div className="navbar-links">
-            <Link
-              to="/dashboard"
-              className={`nav-link ${isActive('/dashboard') ? 'active' : ''}`}
-            >
-              Dashboard
-            </Link>
-            <Link
-              to="/reservations"
-              className={`nav-link ${isActive('/reservations') ? 'active' : ''}`}
-            >
-              My Reservations
-            </Link>
-            <Link
-              to="/notifications"
-              className={`nav-link nav-link-bell ${isActive('/notifications') ? 'active' : ''}`}
-            >
-              🔔
-              {unreadCount > 0 && (
-                <span className="badge-count">{unreadCount}</span>
-              )}
-            </Link>
-            {user?.role === 'admin' && (
-              <Link
-                to="/admin"
-                className={`nav-link ${isActive('/admin') ? 'active' : ''}`}
-              >
-                Admin Panel
-              </Link>
-            )}
+    <div className="workspace">
+      <a className="skip-link" href="#main-content">
+        Skip to content
+      </a>
+      <aside className="sidebar">
+        <Link to="/dashboard" className="brand">
+          <span className="brand-mark">G</span>
+          <span>
+            GPU<span className="brand-light">space</span>
+            <small>MANIPAL UNIVERSITY JAIPUR</small>
+          </span>
+        </Link>
+        <span className="nav-caption">WORKSPACE</span>
+        <nav aria-label="Main navigation">
+          <NavLink to="/dashboard">
+            <span aria-hidden="true">▦</span> GPU catalog
+          </NavLink>
+          <NavLink to="/reservations">
+            <span aria-hidden="true">▤</span> My reservations
+          </NavLink>
+          <NavLink to="/notifications">
+            <span aria-hidden="true">◉</span> Notifications{" "}
+            {unread > 0 && <b className="unread-count">{unread}</b>}
+          </NavLink>
+          {user?.role === "admin" && (
+            <NavLink to="/admin">
+              <span aria-hidden="true">⚙</span> Administration
+            </NavLink>
+          )}
+        </nav>
+        <div className="sidebar-note">
+          <span className="eyebrow">BUILT FOR YOUR NEXT IDEA</span>
+          <p>
+            More compute.
+            <br />
+            More possibilities.
+          </p>
+          <small>Your campus research workspace.</small>
+        </div>
+        <div className="profile">
+          <span className="avatar">
+            {user?.name?.slice(0, 1).toUpperCase()}
+          </span>
+          <div>
+            <strong>{user?.name}</strong>
+            <small>{user?.role}</small>
           </div>
-          <div className="navbar-user">
-            <span className="user-name">
-              {user?.name} <span style={{ opacity: 0.7, fontSize: '0.85em' }}>({user?.role})</span>
-            </span>
-            <button className="btn-logout" onClick={handleLogout}>
-              Logout
+          <button
+            aria-label="Sign out"
+            title="Sign out"
+            disabled={signingOut}
+            onClick={() => handleLogout()}
+          >
+            Sign out
+          </button>
+        </div>
+        <button
+          className="account-settings-toggle"
+          aria-expanded={accountOpen}
+          onClick={() => setAccountOpen((v) => !v)}
+        >
+          Session options
+        </button>
+        {accountOpen && (
+          <div className="account-session-options">
+            <span>Signed in as {user?.email}</span>
+            <button disabled={signingOut} onClick={() => handleLogout(true)}>
+              Sign out on all devices
             </button>
           </div>
-        </div>
-      </nav>
-      <main className="content">{children}</main>
+        )}
+        {signingOut && (
+          <p className="session-status" role="status">
+            Signing out securely...
+          </p>
+        )}
+        {logoutError && (
+          <div className="logout-error" role="alert">
+            {logoutError}
+            <button onClick={() => handleLogout()}>Retry sign out</button>
+          </div>
+        )}
+      </aside>
+      <div className="workspace-body">
+        <header className="topbar">
+          <span>
+            Research computing <span className="topbar-divider">/</span>{" "}
+            <strong>MUJ workspace</strong>
+          </span>
+          <Link to="/reservations">My bookings ↗</Link>
+        </header>
+        <main id="main-content" className="content" tabIndex="-1">
+          {children}
+        </main>
+        <footer className="workspace-footer">
+          GPUspace · Manipal University Jaipur
+          <span>Made for research. Built for discovery.</span>
+        </footer>
+      </div>
     </div>
   );
 }

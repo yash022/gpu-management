@@ -1,5 +1,7 @@
 const express = require('express');
 const router = express.Router();
+router.param('id', require('../middleware/validation').resourceId);
+router.param('gpuId', require('../middleware/validation').resourceId);
 const pool = require('../config/db');
 const { auth } = require('../middleware/auth');
 
@@ -39,12 +41,16 @@ router.get('/gpu/:gpuId', async (req, res) => {
 });
 
 // POST /api/queue - Join waitlist for a GPU
-router.post('/', auth, async (req, res) => {
+router.post('/', auth, require('../middleware/serialize'), async (req, res) => {
   try {
     const { gpu_id } = req.body;
-    if (!gpu_id) {
+    if (!require('../middleware/validation').id(gpu_id)) {
       return res.status(400).json({ message: 'gpu_id is required' });
     }
+
+    const hardware = await pool.query('SELECT status FROM gpus WHERE id = $1', [gpu_id]);
+    if (!hardware.rows.length) return res.status(404).json({ message: 'GPU not found' });
+    if (hardware.rows[0].status !== 'available') return res.status(400).json({ message: 'This GPU is unavailable' });
 
     // Check if user is already in waiting queue for this GPU
     const existing = await pool.query(

@@ -7,17 +7,17 @@ const dotenv = require('dotenv');
 dotenv.config();
 
 let activePool = null;
+let memory = false;
 const poolReady = initDatabase();
 
 async function initDatabase() {
   const connectionString = process.env.DATABASE_URL;
 
   if (connectionString) {
+    const max = Number(process.env.DB_POOL_MAX || 10);
+    if (!Number.isInteger(max) || max < 1 || max > 100) throw new Error('DB_POOL_MAX must be between 1 and 100');
+    const realPool = new Pool({ connectionString, max, connectionTimeoutMillis: 5000, idleTimeoutMillis: 30000, statement_timeout: 10000 });
     try {
-      const realPool = new Pool({
-        connectionString,
-        connectionTimeoutMillis: 1500,
-      });
 
       // Probe connection
       const client = await realPool.connect();
@@ -25,8 +25,10 @@ async function initDatabase() {
 
       // Ensure tables exist
       const schemaSql = fs.readFileSync(path.join(__dirname, '../db/schema.sql'), 'utf8');
-      await client.query(schemaSql);
-      client.release();
+      try {
+        if (process.env.NODE_ENV !== 'production') await client.query(schemaSql);
+        else await client.query('SELECT token_hash FROM auth_sessions LIMIT 0');
+      } finally { client.release(); }
 
       realPool.on('error', (err) => {
         console.error('Unexpected error on idle client', err);
@@ -35,10 +37,14 @@ async function initDatabase() {
       activePool = realPool;
       return activePool;
     } catch (err) {
+      await realPool.end();
+      if (process.env.NODE_ENV === 'production') throw err;
       console.warn('PostgreSQL connection failed (' + err.message + '). Falling back to built-in in-memory database.');
     }
   }
 
+  if (process.env.NODE_ENV === 'production') throw new Error('Production requires a working DATABASE_URL');
+  memory = true;
   // Fallback: pg-mem
   const memDb = newDb();
   const schemaSql = fs.readFileSync(path.join(__dirname, '../db/schema.sql'), 'utf8');
@@ -54,6 +60,9 @@ async function initDatabase() {
 }
 
 const pool = {
+  ready: poolReady,
+  get isMemory() { return memory; },
+  async end() { await poolReady; return activePool.end(); },
   async query(text, params) {
     await poolReady;
     return activePool.query(text, params);

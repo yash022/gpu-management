@@ -50,6 +50,7 @@ function formatTypeLabel(type) {
 
 export default function Notifications() {
   const [notifications, setNotifications] = useState([]);
+  const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
 
   const fetchNotifications = useCallback(async () => {
@@ -57,7 +58,7 @@ export default function Notifications() {
       const res = await api.get('/notifications');
       setNotifications(res.data);
     } catch {
-      // ignore
+      setError('Unable to update notifications. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -70,20 +71,22 @@ export default function Notifications() {
   const markAsRead = async (id) => {
     try {
       await api.put(`/notifications/${id}/read`);
+      window.dispatchEvent(new Event('notifications-updated'));
       setNotifications((prev) =>
         prev.map((n) => (n.id === id ? { ...n, is_read: true } : n))
       );
     } catch {
-      // ignore
+      setError('Unable to update notifications. Please try again.');
     }
   };
 
   const markAllRead = async () => {
     try {
       await api.put('/notifications/read-all');
+      window.dispatchEvent(new Event('notifications-updated'));
       setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
     } catch {
-      // ignore
+      setError('Unable to update notifications. Please try again.');
     }
   };
 
@@ -100,6 +103,7 @@ export default function Notifications() {
             </button>
           )}
         </div>
+        {error && <div className="form-error" role="alert">{error}</div>}
         {loading ? (
           <p className="loading-text">Loading notifications...</p>
         ) : notifications.length === 0 ? (
@@ -109,6 +113,9 @@ export default function Notifications() {
             {notifications.map((n) => (
               <div
                 key={n.id}
+                role="button" tabIndex={0}
+                aria-label={`${n.is_read ? 'Read' : 'Mark as read'}: ${n.message}`}
+                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (!n.is_read) markAsRead(n.id); } }}
                 className={`notification-item ${!n.is_read ? 'unread' : ''}`}
                 onClick={() => !n.is_read && markAsRead(n.id)}
               >

@@ -7,6 +7,7 @@ import './MyReservations.css';
 export default function MyReservations() {
   const [reservations, setReservations] = useState([]);
   const [queueItems, setQueueItems] = useState([]);
+  const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const location = useLocation();
   const [successMsg, setSuccessMsg] = useState(
@@ -22,7 +23,7 @@ export default function MyReservations() {
       setReservations(resRes.data);
       setQueueItems(queueRes.data);
     } catch {
-      // ignore
+      setError('Unable to load reservations. Please refresh to try again.');
     } finally {
       setLoading(false);
     }
@@ -89,7 +90,8 @@ export default function MyReservations() {
   return (
     <Layout>
       <div className="my-reservations">
-        <h1>My Reservations & Queue</h1>
+        <h1>My reservations & queue</h1>
+        {error && <div className="form-error" role="alert">{error}</div>}
         {successMsg && <div className="success-msg">{successMsg}</div>}
         {loading ? (
           <p className="loading-text">Loading reservations...</p>

@@ -1,0 +1,48 @@
+name: Application checks
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: gpuspace_test
+          POSTGRES_PASSWORD: ci-test-only
+          POSTGRES_DB: gpuspace_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U gpuspace_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+      - run: npm ci
+        working-directory: backend
+      - run: npm test
+        working-directory: backend
+      - run: npm run test:postgres
+        working-directory: backend
+        env:
+          SESSION_TEST_DATABASE_URL: postgresql://gpuspace_test:ci-test-only@localhost:5432/gpuspace_test
+      - run: npm ci
+        working-directory: frontend
+      - run: npx playwright install --with-deps chromium
+        working-directory: frontend
+      - run: npm run build && npm run lint && npm test
+        working-directory: frontend
+      - run: npm audit --omit=dev
+        working-directory: backend
+      - run: npm audit --omit=dev
+        working-directory: frontend
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: browser-failure-traces
+          path: frontend/test-results/
