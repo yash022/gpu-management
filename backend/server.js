@@ -6,16 +6,18 @@ dotenv.config();
 
 const app = express();
 if (process.env.TRUST_PROXY) app.set('trust proxy', process.env.TRUST_PROXY.split(',').map(s => s.trim()));
+else if (process.env.VERCEL) app.set('trust proxy', 1);
 app.disable('x-powered-by');
 app.use(require('helmet')());
 // Middleware
+const { isOriginAllowed, csrfOrigin } = require('./middleware/csrf');
 app.use(cors({
-  origin: require('./middleware/csrf').origins,
+  origin: (origin, callback) => callback(null, isOriginAllowed(origin)),
   credentials: true
 }));
 app.use(express.json({ limit: '16kb' }));
 app.use(require('cookie-parser')());
-app.use('/api', require('./middleware/csrf').csrfOrigin);
+app.use('/api', csrfOrigin);
 
 app.use('/api', (req, res, next) => {
   res.setHeader('Cache-Control', 'no-store');
