@@ -8,7 +8,13 @@ dotenv.config();
 
 let activePool = null;
 let memory = false;
-const poolReady = initDatabase();
+const poolReady = initDatabase().catch(error => {
+  error.code = 'DB_INITIALIZATION_FAILED';
+  throw error;
+});
+// Serverless imports can finish before the first request awaits the database.
+// Observe failures here without turning the rejected readiness promise into success.
+poolReady.catch(error => console.error('Database initialization failed:', error.message));
 
 async function initDatabase() {
   const connectionString = process.env.DATABASE_URL;
@@ -38,16 +44,13 @@ async function initDatabase() {
       return activePool;
     } catch (err) {
       await realPool.end();
-      if (process.env.NODE_ENV === 'production' && !process.env.VERCEL && !process.env.ALLOW_IN_MEMORY_DB) throw err;
+      if (process.env.NODE_ENV === 'production' || process.env.VERCEL) throw err;
       console.warn('PostgreSQL connection failed (' + err.message + '). Falling back to built-in in-memory database.');
     }
   }
 
-  if (process.env.NODE_ENV === 'production' && !process.env.VERCEL && !process.env.ALLOW_IN_MEMORY_DB) {
+  if (process.env.NODE_ENV === 'production' || process.env.VERCEL) {
     throw new Error('Production requires a working DATABASE_URL');
-  }
-  if (process.env.NODE_ENV === 'production') {
-    console.warn('WARNING: Running in production without persistent DATABASE_URL. Falling back to in-memory database (data resets on cold start).');
   }
   memory = true;
   // Fallback: pg-mem

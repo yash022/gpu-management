@@ -44,6 +44,12 @@ app.get('/api/ready', async (req, res) => {
 
 // Error handling middleware
 app.use((err, req, res, next) => {
+  if (err.code === 'DB_INITIALIZATION_FAILED') {
+    return res.status(503).json({
+      code: 'DATABASE_UNAVAILABLE',
+      message: 'Sign-in is temporarily unavailable because the server cannot connect to its database. Please try again later.'
+    });
+  }
   if (!err.status || err.status >= 500) console.error(err.stack);
   res.status(err.status === 413 ? 413 : err.type === 'entity.parse.failed' ? 400 : 500).json({ message: err.status === 413 ? 'Request too large' : err.type === 'entity.parse.failed' ? 'Invalid JSON body' : 'Internal server error' });
 });

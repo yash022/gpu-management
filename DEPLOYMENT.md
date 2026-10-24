@@ -42,6 +42,25 @@ refresh `/login` and `/register`, check that JavaScript/CSS assets load, and con
 
 ## Database migration
 
+### Neon connection timeouts on Vercel
+
+If runtime logs report a PostgreSQL connection timeout, verify the Production
+`DATABASE_URL` against the connection string in the Neon project's Connect dialog.
+Use the intended production branch/database and its pooled connection string,
+preserving the TLS parameters supplied by Neon. Check that the Neon endpoint is
+available and its network restrictions permit the deployment. Redeploy after
+updating Vercel environment variables; changing them does not update existing
+deployments.
+
+Production and Vercel deployments never fall back to an in-memory database.
+That fallback would store login sessions separately in each function instance,
+causing successful logins followed by `SESSION_EXPIRED`. A failed database
+initialization now returns HTTP 503 for login instead. Local development retains
+the demo fallback. `ALLOW_IN_MEMORY_DB` cannot override production persistence.
+
+Once the connection works, run the migration below against the same Neon database
+before verifying login, `/api/ready`, and authenticated requests after reload.
+
 Back up the database, then run `cd backend && npm ci && npm run migrate` with
 `DATABASE_URL` set. Migration adds session/rate-limit tables and indexes without
 changing existing users, reservations, or GPU records. The migration takes an
