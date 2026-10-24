@@ -8,13 +8,24 @@ dotenv.config();
 
 let activePool = null;
 let memory = false;
-const poolReady = initDatabase().catch(error => {
-  error.code = 'DB_INITIALIZATION_FAILED';
-  throw error;
-});
-// Serverless imports can finish before the first request awaits the database.
-// Observe failures here without turning the rejected readiness promise into success.
-poolReady.catch(error => console.error('Database initialization failed:', error.message));
+let poolReady;
+let retryAt = 0;
+function ensureReady() {
+  // Share one initialization attempt across concurrent requests. A failed cold
+  // start must not poison a warm serverless instance for its entire lifetime.
+  if (!poolReady || (retryAt && Date.now() >= retryAt)) {
+    retryAt = 0;
+    poolReady = initDatabase().catch(error => {
+      retryAt = Date.now() + 1000;
+      error.code = 'DB_INITIALIZATION_FAILED';
+      throw error;
+    });
+    // Observe eager startup failures even before a request awaits readiness.
+    poolReady.catch(error => console.error('Database initialization failed:', error.message));
+  }
+  return poolReady;
+}
+ensureReady();
 
 async function initDatabase() {
   const connectionString = process.env.DATABASE_URL;
@@ -22,12 +33,11 @@ async function initDatabase() {
   if (connectionString) {
     const max = Number(process.env.DB_POOL_MAX || 10);
     if (!Number.isInteger(max) || max < 1 || max > 100) throw new Error('DB_POOL_MAX must be between 1 and 100');
-    const realPool = new Pool({ connectionString, max, connectionTimeoutMillis: 5000, idleTimeoutMillis: 30000, statement_timeout: 10000 });
+    const realPool = new Pool({ connectionString, max, connectionTimeoutMillis: 10000, idleTimeoutMillis: 30000, statement_timeout: 10000 });
     try {
 
       // Probe connection
       const client = await realPool.connect();
-      console.log('Successfully connected to PostgreSQL database.');
 
       // Ensure tables exist
       const schemaSql = fs.readFileSync(path.join(__dirname, '../db/schema.sql'), 'utf8');
@@ -41,6 +51,7 @@ async function initDatabase() {
       });
 
       activePool = realPool;
+      console.log('PostgreSQL database and session schema are ready.');
       return activePool;
     } catch (err) {
       await realPool.end();
@@ -68,23 +79,26 @@ async function initDatabase() {
 }
 
 const pool = {
-  ready: poolReady,
+  get ready() { return ensureReady(); },
   get isMemory() { return memory; },
-  async end() { await poolReady; return activePool.end(); },
+  async end() {
+    try { await poolReady; } catch { return; }
+    return activePool.end();
+  },
   async query(text, params) {
-    await poolReady;
+    await ensureReady();
     return activePool.query(text, params);
   },
   async connect() {
-    await poolReady;
+    await ensureReady();
     return activePool.connect();
   },
   on(event, handler) {
-    poolReady.then(() => {
+    ensureReady().then(() => {
       if (activePool && typeof activePool.on === 'function') {
         activePool.on(event, handler);
       }
-    });
+    }).catch(() => { /* Initialization failure is already logged above. */ });
   }
 };
 

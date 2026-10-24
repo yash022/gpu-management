@@ -57,6 +57,9 @@ That fallback would store login sessions separately in each function instance,
 causing successful logins followed by `SESSION_EXPIRED`. A failed database
 initialization now returns HTTP 503 for login instead. Local development retains
 the demo fallback. `ALLOW_IN_MEMORY_DB` cannot override production persistence.
+Connection attempts allow up to 10 seconds. After a failed initialization, a later
+request can retry after a one-second cooldown; concurrent requests share that
+attempt. Temporary startup failures do not require a redeployment to recover.
 
 Once the connection works, run the migration below against the same Neon database
 before verifying login, `/api/ready`, and authenticated requests after reload.
