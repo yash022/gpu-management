@@ -26,6 +26,20 @@ a frontend CSP at the proxy; the API's Helmet headers do not protect static HTML
 served by a separate server. HTTPS, HSTS, and proxy-header handling must be checked
 in the actual deployment.
 
+## Vercel page reloads
+
+Deploy the full application with the repository root as the Vercel Root Directory.
+The root `vercel.json` routes `/api` requests to the backend and all other requests
+to the frontend service. Its `services.frontend.rewrites` serves `index.html` for
+client-side routes such as `/login`, `/register`, and `/dashboard`, so opening or
+refreshing these URLs loads React instead of returning a hosting 404. Existing
+static files are served normally.
+
+Keep the SPA rewrite in the root service configuration; `frontend/vercel.json`
+also supplies it for standalone frontend deployments. After deploying, open and
+refresh `/login` and `/register`, check that JavaScript/CSS assets load, and confirm
+`/api/health` still returns the backend response.
+
 ## Database migration
 
 Back up the database, then run `cd backend && npm ci && npm run migrate` with
