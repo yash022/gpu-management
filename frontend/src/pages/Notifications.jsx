@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import api from '../api/axios';
+import api, { authError } from '../api/axios';
 import Layout from '../components/Layout';
 import './Notifications.css';
 
@@ -57,8 +57,9 @@ export default function Notifications() {
     try {
       const res = await api.get('/notifications');
       setNotifications(res.data);
-    } catch {
-      setError('Unable to update notifications. Please try again.');
+      setError('');
+    } catch (err) {
+      setError(authError(err, 'Unable to load notifications. Please try again.'));
     } finally {
       setLoading(false);
     }
@@ -75,8 +76,9 @@ export default function Notifications() {
       setNotifications((prev) =>
         prev.map((n) => (n.id === id ? { ...n, is_read: true } : n))
       );
-    } catch {
-      setError('Unable to update notifications. Please try again.');
+      setError('');
+    } catch (err) {
+      setError(authError(err, 'Unable to update notifications. Please try again.'));
     }
   };
 
@@ -85,8 +87,9 @@ export default function Notifications() {
       await api.put('/notifications/read-all');
       window.dispatchEvent(new Event('notifications-updated'));
       setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
-    } catch {
-      setError('Unable to update notifications. Please try again.');
+      setError('');
+    } catch (err) {
+      setError(authError(err, 'Unable to update notifications. Please try again.'));
     }
   };
 
@@ -103,11 +106,22 @@ export default function Notifications() {
             </button>
           )}
         </div>
-        {error && <div className="form-error" role="alert">{error}</div>}
+        {error && (
+          <div className="form-error" role="alert">
+            {error}{' '}
+            <button type="button" className="text-button" onClick={() => {
+              setLoading(true);
+              setError('');
+              fetchNotifications();
+            }} disabled={loading}>
+              Retry notifications
+            </button>
+          </div>
+        )}
         {loading ? (
           <p className="loading-text">Loading notifications...</p>
         ) : notifications.length === 0 ? (
-          <p className="empty-text">No notifications found.</p>
+          !error && <p className="empty-text">No notifications found.</p>
         ) : (
           <div className="notifications-list">
             {notifications.map((n) => (
