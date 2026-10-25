@@ -94,10 +94,24 @@ when unavailable. SIGTERM/SIGINT stop accepting requests, drain connections, and
 close the database pool, with a 15-second shutdown deadline. Monitor 5xx responses,
 latency, failed logins, rate-limit events, pool usage, and cleanup failures.
 
-The waitlist currently uses process-local serialization for position assignment.
-Coordinate that operation in PostgreSQL before enabling multiple queue-writing
-replicas. Authentication scaling does not by itself certify the entire application
-for arbitrary traffic. Benchmark representative traffic and exercise database
-failover, backup restoration, and load-balancer behavior before launch.
+Waitlist joins, declines, booking claims, cancellations, and offer expiry use
+PostgreSQL transactions and the same GPU row lock across replicas. Local in-memory
+tests additionally serialize requests. Run `npm run migrate` before deploying the
+queue-offer code; it adds nullable offer fields and returns legacy unheld
+`notified` entries to the waiting queue without deleting reservations.
+
+The waitlist remains GPU-wide. Cancelling a future booking offers that exact slot
+to the first waiting user for up to five minutes (capped at the slot start).
+Only that user may book that exact slot during the hold. Declining or expiry
+advances the same slot to the next waiter. Other non-overlapping times remain
+bookable. Acceptance uses the normal booking endpoint and requires a purpose.
+
+Expiry is reconciled on notification reads, queue reads, and booking attempts;
+there is no background cron job. The reservations/queue page polls every 15 seconds
+while visible, and the sidebar polls notifications every 30 seconds. During a
+period with no requests, handoff waits until the next request, which grants the
+next eligible user a fresh offer window. Booking conflicts always check holds
+under the GPU lock. Completing a scheduled booking does not offer its already-past
+time slot. Benchmark traffic and exercise database failover before broader use.
 
 See TESTING.md for the exact local checks and what remains unverified.

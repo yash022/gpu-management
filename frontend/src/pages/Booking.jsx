@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../api/axios';
 import Layout from '../components/Layout';
 import './Booking.css';
@@ -9,6 +9,9 @@ const todayInIndia = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ko
 export default function Booking() {
   const { gpuId } = useParams();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const offerId = searchParams.get('offer');
+  const [offer, setOffer] = useState(null);
   const [gpu, setGpu] = useState(null);
   const [queueCount, setQueueCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -31,12 +34,22 @@ export default function Booking() {
       const found = gpusRes.data.find((g) => g.id === parseInt(gpuId));
       setGpu(found || null);
       setQueueCount(queueRes.data?.waiting_count || 0);
+      if (offerId) {
+        const { data } = await api.get('/queue');
+        const held = data.find(q => String(q.id) === offerId && q.gpu_id === Number(gpuId) && q.status === 'notified' && new Date(q.offer_expires_at) > new Date());
+        setOffer(held || null);
+        if (held) {
+          setDate(held.offer_date.slice(0, 10));
+          setStartTime(held.offer_start.slice(0, 5));
+          setEndTime(held.offer_end.slice(0, 5));
+        } else setError('This offer has expired or is no longer available. Return to My reservations & queue.');
+      }
     } catch {
       setError('Unable to load this resource. Please try again.');
     } finally {
       setLoading(false);
     }
-  }, [gpuId]);
+  }, [gpuId, offerId]);
 
   useEffect(() => {
     fetchGpuData();
@@ -66,12 +79,13 @@ export default function Booking() {
         start_time: startTime,
         end_time: endTime,
         purpose: purpose.trim(),
+        ...(offerId ? { queue_offer_id: offerId } : {}),
       });
       navigate('/reservations', { state: { success: true } });
     } catch (err) {
       if (err.response?.status === 409) {
-        setError('This time slot is already reserved by another user.');
-        setConflictOccurred(true);
+        setError(err.response.data?.message || 'This time slot is unavailable.');
+        setConflictOccurred(!offerId);
       } else {
         const msg =
           err.response?.data?.error || err.response?.data?.message || 'Booking failed.';
@@ -114,6 +128,7 @@ export default function Booking() {
       <div className="booking">
         <h1>Make room for your next idea.</h1>
         <p className="booking-hint">Choose your session. All dates and times are in India Standard Time (IST).</p>
+        {offer && <p role="status">This exact slot is held for you until {new Date(offer.offer_expires_at).toLocaleTimeString('en-GB', { timeZone: 'Asia/Kolkata' })} IST. Confirm before the hold expires.</p>}
         <div className="booking-gpu-info">
           <div>
             <h2>{gpu.model}</h2>
@@ -137,7 +152,7 @@ export default function Booking() {
         {conflictOccurred && (
           <div style={{ background: '#fef3c7', border: '1px solid #fde68a', padding: '14px', borderRadius: '8px', marginBottom: '16px' }}>
             <p style={{ margin: '0 0 10px 0', color: '#92400e', fontWeight: 500 }}>
-              Slot conflict: Another researcher or student is using {gpu.model} during this slot.
+              This time slot is booked or held for another waitlisted user. Join the GPU waitlist to receive an offer if a future slot becomes available.
             </p>
             <button
               type="button"
@@ -157,6 +172,7 @@ export default function Booking() {
             <input
               id="date"
               type="date"
+              readOnly={Boolean(offerId)}
               min={todayInIndia()}
               value={date}
               onChange={(e) => setDate(e.target.value)}
@@ -169,6 +185,7 @@ export default function Booking() {
               <input
                 id="start-time"
                 type="time"
+                readOnly={Boolean(offerId)}
                 value={startTime}
                 onChange={(e) => setStartTime(e.target.value)}
                 required
@@ -179,6 +196,7 @@ export default function Booking() {
               <input
                 id="end-time"
                 type="time"
+                readOnly={Boolean(offerId)}
                 value={endTime}
                 onChange={(e) => setEndTime(e.target.value)}
                 required
@@ -198,7 +216,7 @@ export default function Booking() {
             />
           </div>
           <div style={{ display: 'flex', gap: '12px' }}>
-            <button type="submit" className="btn-primary" disabled={submitting || gpu.status !== 'available'}>
+            <button type="submit" className="btn-primary" disabled={submitting || gpu.status !== 'available' || (Boolean(offerId) && !offer)}>
               {submitting ? 'Confirming...' : 'Confirm Reservation'}
             </button>
             <button

@@ -1,124 +1,67 @@
 const express = require('express');
 const router = express.Router();
-router.param('id', require('../middleware/validation').resourceId);
-router.param('gpuId', require('../middleware/validation').resourceId);
 const pool = require('../config/db');
 const { auth } = require('../middleware/auth');
+const serialize = require('../middleware/serialize');
+const { withGpuLock, refreshLocked, refreshExpired, offerNext, renumber, fail, slotFromOffer, dateKey } = require('../config/queue-offers');
+router.param('id', require('../middleware/validation').resourceId);
+router.param('gpuId', require('../middleware/validation').resourceId);
+const respondError = (res, error) => {
+  if (!error.status) console.error('Queue error:', error.message);
+  res.status(error.status || 500).json({ message: error.status ? error.message : 'Unable to update the waitlist. Please retry.' });
+};
 
-// GET /api/queue - Get current user's waiting list entries
-router.get('/', auth, async (req, res) => {
+router.get('/', auth, serialize, async (req, res) => {
   try {
-    const result = await pool.query(
-      `SELECT q.id, q.gpu_id, q.position, q.status, q.joined_at,
-              g.model AS gpu_model, g.vram AS gpu_vram, g.location AS gpu_location
-       FROM queue q
-       JOIN gpus g ON q.gpu_id = g.id
-       WHERE q.user_id = $1
-       ORDER BY q.joined_at DESC`,
-      [req.user.id]
-    );
-    res.json(result.rows);
-  } catch (err) {
-    console.error('Get queue error:', err.message);
-    res.status(500).json({ message: 'Server error' });
-  }
+    await refreshExpired();
+    const result = await pool.query(`SELECT q.*, g.model AS gpu_model, g.vram AS gpu_vram, g.location AS gpu_location
+      FROM queue q JOIN gpus g ON q.gpu_id = g.id WHERE q.user_id = $1 ORDER BY q.joined_at DESC`, [req.user.id]);
+    res.json(result.rows.map(row => ({ ...row, offer_date: row.offer_date ? dateKey(row.offer_date) : null })));
+  } catch (error) { respondError(res, error); }
 });
 
-// GET /api/queue/gpu/:gpuId - Get queue count for a specific GPU
 router.get('/gpu/:gpuId', async (req, res) => {
   try {
-    const result = await pool.query(
-      `SELECT COUNT(*) AS waiting_count
-       FROM queue
-       WHERE gpu_id = $1 AND status = 'waiting'`,
-      [req.params.gpuId]
-    );
-    res.json({ waiting_count: parseInt(result.rows[0].waiting_count || 0) });
-  } catch (err) {
-    console.error('Get GPU queue count error:', err.message);
-    res.status(500).json({ message: 'Server error' });
-  }
+    const result = await pool.query("SELECT COUNT(*) AS waiting_count FROM queue WHERE gpu_id = $1 AND status = 'waiting'", [req.params.gpuId]);
+    res.json({ waiting_count: Number(result.rows[0].waiting_count) });
+  } catch (error) { respondError(res, error); }
 });
 
-// POST /api/queue - Join waitlist for a GPU
-router.post('/', auth, require('../middleware/serialize'), async (req, res) => {
+router.post('/', auth, serialize, async (req, res) => {
+  const { gpu_id } = req.body;
+  if (!require('../middleware/validation').id(gpu_id)) return res.status(400).json({ message: 'gpu_id is required' });
   try {
-    const { gpu_id } = req.body;
-    if (!require('../middleware/validation').id(gpu_id)) {
-      return res.status(400).json({ message: 'gpu_id is required' });
-    }
-
-    const hardware = await pool.query('SELECT status FROM gpus WHERE id = $1', [gpu_id]);
-    if (!hardware.rows.length) return res.status(404).json({ message: 'GPU not found' });
-    if (hardware.rows[0].status !== 'available') return res.status(400).json({ message: 'This GPU is unavailable' });
-
-    // Check if user is already in waiting queue for this GPU
-    const existing = await pool.query(
-      `SELECT id FROM queue WHERE user_id = $1 AND gpu_id = $2 AND status = 'waiting'`,
-      [req.user.id, gpu_id]
-    );
-
-    if (existing.rows.length > 0) {
-      return res.status(400).json({ message: 'You are already in the queue for this GPU' });
-    }
-
-    // Determine next position
-    const maxPosRes = await pool.query(
-      `SELECT COALESCE(MAX(position), 0) AS max_pos FROM queue WHERE gpu_id = $1 AND status = 'waiting'`,
-      [gpu_id]
-    );
-    const nextPos = parseInt(maxPosRes.rows[0].max_pos) + 1;
-
-    const insertRes = await pool.query(
-      `INSERT INTO queue (user_id, gpu_id, position, status)
-       VALUES ($1, $2, $3, 'waiting')
-       RETURNING id, user_id, gpu_id, position, status, joined_at`,
-      [req.user.id, gpu_id, nextPos]
-    );
-
-    // Fetch GPU info for notification
-    const gpuRes = await pool.query('SELECT model FROM gpus WHERE id = $1', [gpu_id]);
-    const gpuModel = gpuRes.rows[0]?.model || 'GPU';
-
-    await pool.query(
-      `INSERT INTO notifications (user_id, message, type)
-       VALUES ($1, $2, 'queue_update')`,
-      [
-        req.user.id,
-        `You joined the waitlist for ${gpuModel} at position #${nextPos}.`
-      ]
-    );
-
-    res.status(201).json(insertRes.rows[0]);
-  } catch (err) {
-    console.error('Join queue error:', err.message);
-    res.status(500).json({ message: 'Server error' });
-  }
+    const entry = await withGpuLock(gpu_id, async (client, gpu) => {
+      await refreshLocked(client, gpu);
+      if (gpu.status !== 'available') throw fail(400, 'This GPU is unavailable');
+      const existing = await client.query("SELECT id FROM queue WHERE user_id = $1 AND gpu_id = $2 AND status IN ('waiting', 'notified')", [req.user.id, gpu_id]);
+      if (existing.rows.length) throw fail(400, 'You are already waiting or have an active offer for this GPU');
+      await renumber(client, gpu_id);
+      const count = await client.query("SELECT COUNT(*) AS count FROM queue WHERE gpu_id = $1 AND status = 'waiting'", [gpu_id]);
+      const position = Number(count.rows[0].count) + 1;
+      const result = await client.query("INSERT INTO queue (user_id, gpu_id, position, status) VALUES ($1, $2, $3, 'waiting') RETURNING *", [req.user.id, gpu_id, position]);
+      await client.query("INSERT INTO notifications (user_id, message, type) VALUES ($1, $2, 'queue_update')", [req.user.id, `You joined the waitlist for ${gpu.model} at position #${position}. If a future booking is cancelled, the next user gets an exclusive offer for up to 5 minutes.`]);
+      return result.rows[0];
+    });
+    res.status(201).json(entry);
+  } catch (error) { respondError(res, error); }
 });
 
-// DELETE /api/queue/:id - Leave queue
-router.delete('/:id', auth, async (req, res) => {
+router.delete('/:id', auth, serialize, async (req, res) => {
   try {
-    const queueItem = await pool.query(
-      'SELECT id, user_id, gpu_id, position FROM queue WHERE id = $1',
-      [req.params.id]
-    );
-
-    if (queueItem.rows.length === 0) {
-      return res.status(404).json({ message: 'Queue entry not found' });
-    }
-
-    if (queueItem.rows[0].user_id !== req.user.id && req.user.role !== 'admin') {
-      return res.status(403).json({ message: 'Not authorized to remove this queue entry' });
-    }
-
-    await pool.query('DELETE FROM queue WHERE id = $1', [req.params.id]);
-
-    res.json({ message: 'Left the queue successfully' });
-  } catch (err) {
-    console.error('Leave queue error:', err.message);
-    res.status(500).json({ message: 'Server error' });
-  }
+    const found = await pool.query('SELECT gpu_id FROM queue WHERE id = $1', [req.params.id]);
+    if (!found.rows.length) throw fail(404, 'Queue entry not found');
+    await withGpuLock(found.rows[0].gpu_id, async (client, gpu) => {
+      await refreshLocked(client, gpu);
+      const result = await client.query('SELECT * FROM queue WHERE id = $1', [req.params.id]);
+      const entry = result.rows[0];
+      if (!entry) throw fail(404, 'Queue entry not found');
+      if (entry.user_id !== req.user.id && req.user.role !== 'admin') throw fail(403, 'Not authorized to remove this queue entry');
+      await client.query('DELETE FROM queue WHERE id = $1', [entry.id]);
+      if (entry.status === 'notified') await offerNext(client, gpu, slotFromOffer(entry));
+      await renumber(client, gpu.id);
+    });
+    res.json({ message: 'Left the queue. Any held slot has been offered to the next waiting user.' });
+  } catch (error) { respondError(res, error); }
 });
-
 module.exports = router;

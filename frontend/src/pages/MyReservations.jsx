@@ -9,6 +9,7 @@ export default function MyReservations() {
   const [queueItems, setQueueItems] = useState([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+  const [now, setNow] = useState(() => Date.now());
   const location = useLocation();
   const [successMsg, setSuccessMsg] = useState(
     location.state?.success ? 'Reservation created successfully!' : ''
@@ -18,10 +19,11 @@ export default function MyReservations() {
     try {
       const [resRes, queueRes] = await Promise.all([
         api.get('/reservations'),
-        api.get('/queue').catch(() => ({ data: [] })),
+        api.get('/queue'),
       ]);
       setReservations(resRes.data);
       setQueueItems(queueRes.data);
+      setError('');
     } catch {
       setError('Unable to load reservations. Please refresh to try again.');
     } finally {
@@ -31,6 +33,13 @@ export default function MyReservations() {
 
   useEffect(() => {
     fetchReservationsAndQueue();
+    const poll = setInterval(() => {
+      if (document.visibilityState === 'visible') fetchReservationsAndQueue();
+    }, 15000);
+    const clock = setInterval(() => setNow(Date.now()), 1000);
+    const focus = () => fetchReservationsAndQueue();
+    window.addEventListener('focus', focus);
+    return () => { clearInterval(poll); clearInterval(clock); window.removeEventListener('focus', focus); };
   }, [fetchReservationsAndQueue]);
 
   useEffect(() => {
@@ -51,7 +60,7 @@ export default function MyReservations() {
   };
 
   const handleLeaveQueue = async (id) => {
-    if (!window.confirm('Leave the waitlist queue?')) return;
+    if (!window.confirm('Leave the waitlist? Any held slot will be offered to the next user.')) return;
     try {
       await api.delete(`/queue/${id}`);
       fetchReservationsAndQueue();
@@ -91,6 +100,7 @@ export default function MyReservations() {
     <Layout>
       <div className="my-reservations">
         <h1>My reservations & queue</h1>
+        <p>Cancelled future slots are offered in queue order, with an exclusive hold of up to 5 minutes. Book the offered slot or decline to pass it on. Queue updates every 15 seconds.</p>
         {error && <div className="form-error" role="alert">{error}</div>}
         {successMsg && <div className="success-msg">{successMsg}</div>}
         {loading ? (
@@ -111,6 +121,7 @@ export default function MyReservations() {
                         <th>Location</th>
                         <th>Queue Position</th>
                         <th>Status</th>
+                        <th>Offered slot (IST)</th>
                         <th>Joined</th>
                         <th>Action</th>
                       </tr>
@@ -120,24 +131,29 @@ export default function MyReservations() {
                         <tr key={q.id}>
                           <td className="td-model">{q.gpu_model} ({q.gpu_vram})</td>
                           <td>{q.gpu_location}</td>
-                          <td><strong style={{ color: '#2563eb' }}>#{q.position} in line</strong></td>
+                          <td>{q.status === 'waiting' ? <strong style={{ color: '#2563eb' }}>#{q.position} in line</strong> : '—'}</td>
                           <td>
                             <span className={`status-badge ${getStatusClass(q.status)}`}>
-                              {q.status === 'notified' ? 'Slot Available! Book Now' : q.status}
+                              {q.reservation_id ? 'Booked' : q.status === 'notified' ? (new Date(q.offer_expires_at).getTime() > now ? 'Held for you' : 'Offer expired') : q.status}
                             </span>
                           </td>
+                          <td>{q.offer_date ? <>
+                            {q.offer_date.slice(0, 10)} {q.offer_start?.slice(0, 5)}–{q.offer_end?.slice(0, 5)}
+                            {q.status === 'notified' && <div>{Math.max(0, Math.ceil((new Date(q.offer_expires_at).getTime() - now) / 1000))} seconds remaining</div>}
+                          </> : 'Awaiting a cancelled slot'}</td>
                           <td>{formatDate(q.joined_at)}</td>
                           <td>
-                            {q.status === 'notified' ? (
-                              <Link to={`/book/${q.gpu_id}`} className="btn-primary" style={{ padding: '4px 10px', fontSize: '0.85rem' }}>
+                            {q.status === 'notified' && new Date(q.offer_expires_at).getTime() > now && (
+                              <Link to={`/book/${q.gpu_id}?offer=${q.id}`} className="btn-primary" style={{ padding: '4px 10px', fontSize: '0.85rem' }}>
                                 Book Now
                               </Link>
-                            ) : (
+                            )}
+                            {['waiting', 'notified'].includes(q.status) && (
                               <button
                                 className="btn-cancel"
                                 onClick={() => handleLeaveQueue(q.id)}
                               >
-                                Leave
+                                {q.status === 'notified' ? 'Decline offer' : 'Leave'}
                               </button>
                             )}
                           </td>

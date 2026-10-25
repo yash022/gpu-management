@@ -5,6 +5,7 @@ const router = express.Router();
 router.param('id', require('../middleware/validation').resourceId);
 router.param('gpuId', require('../middleware/validation').resourceId);
 const pool = require('../config/db');
+const { withGpuLock, refreshLocked, offerNext, renumber, fail, dateKey, timeKey } = require('../config/queue-offers');
 const { auth, adminOnly } = require('../middleware/auth');
 
 // GET /api/reservations - Current user's reservations with GPU info
@@ -45,163 +46,59 @@ router.get('/all', auth, adminOnly, async (req, res) => {
   }
 });
 
-// POST /api/reservations - Create reservation with conflict check
+// All allocation paths share a database row lock on the GPU.
 router.post('/', auth, bookingBody, serialize, async (req, res) => {
-  let client;
-  let committed = false;
   try {
-    client = await pool.connect();
-    await client.query('BEGIN');
-    const { gpu_id, date, start_time, end_time, purpose } = req.body;
-
-    const hardware = await client.query('SELECT status FROM gpus WHERE id = $1' + (pool.isMemory ? '' : ' FOR UPDATE'), [gpu_id]);
-    if (!hardware.rows.length) return res.status(404).json({ message: 'GPU not found' });
-    if (hardware.rows[0].status !== 'available') return res.status(400).json({ message: 'This GPU is not available for booking' });
-
-    // Check for time conflicts: overlapping confirmed reservations on the same GPU and date
-    const conflictCheck = await client.query(
-      `SELECT id FROM reservations
-       WHERE gpu_id = $1
-         AND date = $2
-         AND status = 'confirmed'
-         AND start_time < $4
-         AND end_time > $3`,
-      [gpu_id, date, start_time, end_time]
-    );
-
-    if (conflictCheck.rows.length > 0) {
-      return res.status(409).json({ message: 'Time slot conflicts with an existing reservation' });
-    }
-
-    // Create the reservation
-    const result = await client.query(
-      `INSERT INTO reservations (user_id, gpu_id, date, start_time, end_time, purpose)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING id, user_id, gpu_id, date, start_time, end_time, status, purpose, created_at`,
-      [req.user.id, gpu_id, date, start_time, end_time, purpose]
-    );
-
-    const reservation = result.rows[0];
-
-    // Get GPU model for the notification message
-    const gpuResult = await client.query('SELECT model FROM gpus WHERE id = $1', [gpu_id]);
-    const gpuModel = gpuResult.rows.length > 0 ? gpuResult.rows[0].model : 'Unknown GPU';
-
-    // Create a notification for the user
-    await client.query(
-      `INSERT INTO notifications (user_id, message, type)
-       VALUES ($1, $2, $3)`,
-      [
-        req.user.id,
-        `Your reservation for ${gpuModel} on ${date} from ${start_time} to ${end_time} has been confirmed.`,
-        'booking_confirmed'
-      ]
-    );
-
-    // Also update any queue entry for this user and GPU if they were waiting
-    await client.query(
-      `UPDATE queue SET status = 'expired' WHERE user_id = $1 AND gpu_id = $2 AND status = 'waiting'`,
-      [req.user.id, gpu_id]
-    );
-
-    await client.query('COMMIT');
-    committed = true;
-    res.status(201).json(reservation);
-  } catch (err) {
-    console.error('Create reservation error:', err.message);
-    res.status(500).json({ message: 'Server error' });
-  } finally {
-    if (client) {
-      try { if (!committed) await client.query('ROLLBACK'); }
-      catch (err) { console.error('Rollback failed:', err.message); }
-      finally { client.release(); }
-    }
-  }
-});
-
-// PUT /api/reservations/:id/cancel - Cancel reservation (owner or admin)
-router.put('/:id/cancel', auth, async (req, res) => {
-  try {
-    // Get the reservation
-    const reservation = await pool.query(
-      'SELECT id, user_id, gpu_id, date, start_time, end_time, status FROM reservations WHERE id = $1',
-      [req.params.id]
-    );
-
-    if (reservation.rows.length === 0) {
-      return res.status(404).json({ message: 'Reservation not found' });
-    }
-
-    const resData = reservation.rows[0];
-
-    // Check if user is the owner or admin
-    if (resData.user_id !== req.user.id && req.user.role !== 'admin') {
-      return res.status(403).json({ message: 'Not authorized to cancel this reservation' });
-    }
-
-    if (resData.status !== 'confirmed') return res.status(409).json({ message: 'Only confirmed reservations can be cancelled' });
-
-    // Update status to cancelled
-    const cancelled = await pool.query(
-      "UPDATE reservations SET status = 'cancelled' WHERE id = $1 AND status = 'confirmed' RETURNING id",
-      [req.params.id]
-    );
-    if (!cancelled.rows.length) return res.status(409).json({ message: 'Reservation is already cancelled' });
-
-    // Get GPU model for the notification message
-    const gpuResult = await pool.query('SELECT model FROM gpus WHERE id = $1', [resData.gpu_id]);
-    const gpuModel = gpuResult.rows.length > 0 ? gpuResult.rows[0].model : 'Unknown GPU';
-    const dateFormatted = resData.date instanceof Date ? resData.date.toISOString().split('T')[0] : resData.date;
-
-    // Create a notification for the user whose reservation was cancelled
-    await pool.query(
-      `INSERT INTO notifications (user_id, message, type)
-       VALUES ($1, $2, $3)`,
-      [
-        resData.user_id,
-        `Your reservation for ${gpuModel} on ${dateFormatted} from ${resData.start_time} to ${resData.end_time} has been cancelled.`,
-        'booking_cancelled'
-      ]
-    );
-
-    // Queue allocation & notification: Check if any user is waiting in the queue for this GPU
-    try {
-      const nextInQueue = await pool.query(
-        `SELECT q.id, q.user_id
-         FROM queue q
-         WHERE q.gpu_id = $1 AND q.status = 'waiting'
-         ORDER BY q.position ASC
-         LIMIT 1`,
-        [resData.gpu_id]
-      );
-
-      if (nextInQueue.rows.length > 0) {
-        const queuedUser = nextInQueue.rows[0];
-        // Update queue status
-        await pool.query(
-          `UPDATE queue SET status = 'notified' WHERE id = $1`,
-          [queuedUser.id]
-        );
-
-        // Notify queued user that a slot has become available
-        await pool.query(
-          `INSERT INTO notifications (user_id, message, type)
-           VALUES ($1, $2, 'queue_update')`,
-          [
-            queuedUser.user_id,
-            `Great news! A reservation slot for ${gpuModel} was cancelled. You are next in line to book this GPU.`
-          ]
-        );
+    const { gpu_id, date, start_time, end_time, purpose, queue_offer_id } = req.body;
+    // Commit expiry transitions even when the subsequent booking is rejected.
+    await withGpuLock(gpu_id, refreshLocked);
+    const reservation = await withGpuLock(gpu_id, async (client, gpu) => {
+      await refreshLocked(client, gpu);
+      if (gpu.status !== 'available') throw fail(400, 'This GPU is not available for booking');
+      const holds = await client.query("SELECT * FROM queue WHERE gpu_id = $1 AND offer_date = $2 AND status = 'notified' AND offer_start < $4 AND offer_end > $3", [gpu_id, date, start_time, end_time]);
+      let ownOffer;
+      for (const hold of holds.rows) {
+        if (hold.user_id !== req.user.id) throw fail(409, 'This slot is temporarily held for the next waitlisted user. Choose another slot or join the waitlist.', 'SLOT_HELD');
+        if (timeKey(hold.offer_start) !== start_time || timeKey(hold.offer_end) !== end_time) throw fail(409, 'Book the exact time slot shown in your queue offer.', 'OFFER_SLOT_MISMATCH');
+        ownOffer = hold;
       }
-    } catch (queueErr) {
-      console.warn('Queue notification notice:', queueErr.message);
-    }
-
-    res.json({ message: 'Reservation cancelled successfully' });
-  } catch (err) {
-    console.error('Cancel reservation error:', err.message);
-    res.status(500).json({ message: 'Server error' });
+      if (queue_offer_id !== undefined && (!ownOffer || String(ownOffer.id) !== String(queue_offer_id))) throw fail(409, 'Your offer has expired or is no longer available. Check your queue.', 'OFFER_EXPIRED');
+      const conflict = await client.query("SELECT id FROM reservations WHERE gpu_id = $1 AND date = $2 AND status = 'confirmed' AND start_time < $4 AND end_time > $3", [gpu_id, date, start_time, end_time]);
+      if (conflict.rows.length) throw fail(409, 'Time slot conflicts with an existing reservation', 'SLOT_BOOKED');
+      const result = await client.query('INSERT INTO reservations (user_id, gpu_id, date, start_time, end_time, purpose) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *', [req.user.id, gpu_id, date, start_time, end_time, purpose]);
+      const booked = result.rows[0];
+      await client.query("INSERT INTO notifications (user_id, message, type) VALUES ($1,$2,'booking_confirmed')", [req.user.id, `Your reservation for ${gpu.model} on ${date} from ${start_time} to ${end_time} IST has been confirmed.`]);
+      if (ownOffer) await client.query("UPDATE queue SET status = 'expired', reservation_id = $1 WHERE id = $2", [booked.id, ownOffer.id]);
+      await client.query("UPDATE queue SET status = 'expired', reservation_id = $3 WHERE user_id = $1 AND gpu_id = $2 AND status = 'waiting'", [req.user.id, gpu_id, booked.id]);
+      await renumber(client, gpu_id);
+      return booked;
+    });
+    res.status(201).json(reservation);
+  } catch (error) {
+    if (!error.status) console.error('Create reservation error:', error.message);
+    res.status(error.status || 500).json({ message: error.status ? error.message : 'Unable to create reservation. Please retry.', code: error.status ? error.code : undefined });
   }
 });
 
+router.put('/:id/cancel', auth, serialize, async (req, res) => {
+  try {
+    const found = await pool.query('SELECT gpu_id FROM reservations WHERE id = $1', [req.params.id]);
+    if (!found.rows.length) throw fail(404, 'Reservation not found');
+    await withGpuLock(found.rows[0].gpu_id, async (client, gpu) => {
+      await refreshLocked(client, gpu);
+      const result = await client.query('SELECT * FROM reservations WHERE id = $1', [req.params.id]);
+      const reservation = result.rows[0];
+      if (!reservation) throw fail(404, 'Reservation not found');
+      if (reservation.user_id !== req.user.id && req.user.role !== 'admin') throw fail(403, 'Not authorized to cancel this reservation');
+      if (reservation.status !== 'confirmed') throw fail(409, 'Only confirmed reservations can be cancelled');
+      await client.query("UPDATE reservations SET status = 'cancelled' WHERE id = $1", [reservation.id]);
+      await client.query("INSERT INTO notifications (user_id, message, type) VALUES ($1,$2,'booking_cancelled')", [reservation.user_id, `Your reservation for ${gpu.model} on ${dateKey(reservation.date)} from ${timeKey(reservation.start_time)} to ${timeKey(reservation.end_time)} IST has been cancelled.`]);
+      await offerNext(client, gpu, reservation);
+    });
+    res.json({ message: 'Reservation cancelled successfully' });
+  } catch (error) {
+    if (!error.status) console.error('Cancel reservation error:', error.message);
+    res.status(error.status || 500).json({ message: error.status ? error.message : 'Unable to cancel reservation. Please retry.' });
+  }
+});
 module.exports = router;

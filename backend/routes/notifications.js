@@ -6,8 +6,9 @@ const pool = require('../config/db');
 const { auth } = require('../middleware/auth');
 
 // GET /api/notifications - User's notifications ordered by created_at DESC
-router.get('/', auth, async (req, res) => {
+router.get('/', auth, require('../middleware/serialize'), async (req, res) => {
   try {
+    await require('../config/queue-offers').refreshExpired();
     const result = await pool.query(
       'SELECT id, message, type, is_read, created_at FROM notifications WHERE user_id = $1 ORDER BY created_at DESC',
       [req.user.id]

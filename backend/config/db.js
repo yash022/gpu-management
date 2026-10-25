@@ -43,7 +43,10 @@ async function initDatabase() {
       const schemaSql = fs.readFileSync(path.join(__dirname, '../db/schema.sql'), 'utf8');
       try {
         if (process.env.NODE_ENV !== 'production') await client.query(schemaSql);
-        else await client.query('SELECT token_hash FROM auth_sessions LIMIT 0');
+        else {
+          await client.query('SELECT token_hash FROM auth_sessions LIMIT 0');
+          await client.query('SELECT offer_date, offer_start, offer_end, offer_expires_at, reservation_id FROM queue LIMIT 0');
+        }
       } finally { client.release(); }
 
       realPool.on('error', (err) => {

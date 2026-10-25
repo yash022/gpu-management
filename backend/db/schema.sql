@@ -40,6 +40,15 @@ CREATE TABLE IF NOT EXISTS queue (
     joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Additive migration: existing GPU-wide waitlist entries remain valid.
+ALTER TABLE queue ADD COLUMN IF NOT EXISTS offer_date DATE;
+ALTER TABLE queue ADD COLUMN IF NOT EXISTS offer_start TIME;
+ALTER TABLE queue ADD COLUMN IF NOT EXISTS offer_end TIME;
+ALTER TABLE queue ADD COLUMN IF NOT EXISTS offer_expires_at TIMESTAMPTZ;
+ALTER TABLE queue ADD COLUMN IF NOT EXISTS reservation_id INTEGER REFERENCES reservations(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS queue_offer_expiry_idx ON queue(status, offer_expires_at);
+UPDATE queue SET status = 'waiting' WHERE status = 'notified' AND offer_expires_at IS NULL;
+
 CREATE TABLE IF NOT EXISTS notifications (
     id SERIAL PRIMARY KEY,
     user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
