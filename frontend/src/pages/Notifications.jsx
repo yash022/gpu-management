@@ -58,6 +58,19 @@ export default function Notifications() {
       const res = await api.get('/notifications');
       setNotifications(res.data);
       setError('');
+      setLoading(false);
+      // Mark only the notifications loaded into this view, not new arrivals.
+      const unread = res.data.filter(n => !n.is_read);
+      if (unread.length) {
+        const results = await Promise.allSettled(
+          unread.map(n => api.put(`/notifications/${n.id}/read`))
+        );
+        const readIds = new Set(unread.filter((_, index) => results[index].status === 'fulfilled').map(n => n.id));
+        setNotifications(prev => prev.map(n => readIds.has(n.id) ? { ...n, is_read: true } : n));
+        window.dispatchEvent(new Event('notifications-updated'));
+        const failure = results.find(result => result.status === 'rejected');
+        if (failure) setError(authError(failure.reason, 'Unable to mark notifications as read. Please try again.'));
+      }
     } catch (err) {
       setError(authError(err, 'Unable to load notifications. Please try again.'));
     } finally {

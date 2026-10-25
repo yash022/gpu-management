@@ -59,7 +59,8 @@ test("registration, catalog filters, booking, notifications and cancellation", a
   ).toBeVisible();
   await page.getByRole("link", { name: /Notifications/ }).click();
   await expect(page.getByText("Confirmed", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Mark All Read" }).click();
+  await expect(page.locator('.notification-item.unread')).toHaveCount(0);
+  await expect(page.locator('.unread-count')).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Mark All Read" })).toHaveCount(
     0,
   );

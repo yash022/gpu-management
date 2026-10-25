@@ -26,13 +26,16 @@ export default function Layout({ children }) {
   };
   useEffect(() => {
     let active = true;
-    const refresh = () =>
-      api
+    let revision = 0;
+    const refresh = () => {
+      const current = ++revision;
+      return api
         .get("/notifications")
         .then(({ data }) => {
-          if (active) setUnread(data.filter((n) => !n.is_read).length);
+          if (active && current === revision) setUnread(data.filter((n) => !n.is_read).length);
         })
         .catch(() => {});
+    };
     refresh();
     const timer = setInterval(refresh, 30000);
     window.addEventListener("notifications-updated", refresh);

@@ -21,13 +21,15 @@ test('notifications recover from load and update failures without stale errors',
   await expect(page.getByText('No notifications found.')).toHaveCount(0);
   failLoad = false;
   await page.getByRole('button', { name: 'Retry notifications' }).click();
-  await expect(page.getByRole('alert')).toHaveCount(0);
   const notification = page.getByRole('button', { name: 'Mark as read: Your booking is confirmed.' });
-  await notification.click();
   await expect(page.getByRole('alert')).toContainText('Update temporarily unavailable.');
   await expect(notification).toBeVisible();
   failUpdate = false;
-  await notification.click();
+  await page.getByRole('button', { name: 'Retry notifications' }).click();
   await expect(page.getByRole('button', { name: 'Read: Your booking is confirmed.' })).toBeVisible();
   await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect(page.locator('.unread-count')).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Read: Your booking is confirmed.' })).toBeVisible();
+  await expect(page.locator('.unread-count')).toHaveCount(0);
 });
